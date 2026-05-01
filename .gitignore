@@ -1,0 +1,40 @@
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Environment secrets
+.env
+
+# Database (local data - not committed)
+*.db
+*.sqlite
+*.sqlite3
+
+# Uploaded files (user data - not committed)
+uploads/
+
+# Logs
+*.log
+logs/
+
+# Frontend (separate repo)
+Frontend_Data/
+frontend/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

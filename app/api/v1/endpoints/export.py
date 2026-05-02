@@ -35,15 +35,45 @@ def _extract_rows(job_result: dict) -> tuple[list[dict], list[str]]:
     # Multi-record mode: { records: [{result, confidence, ...}, ...] }
     if "records" in job_result:
         records = job_result["records"]
-        field_names = job_result.get("schema_fields", [])
-        if not field_names and records:
-            field_names = records[0].get("schema_fields", list(records[0].get("result", {}).keys()))
+        schema_fields = job_result.get("schema_fields", [])
+        if not schema_fields and records:
+            schema_fields = records[0].get("schema_fields", list(records[0].get("result", {}).keys()))
 
+        top_field_names = schema_fields
+        item_field_names: list[str] = []
+        array_key_used: str | None = None
         rows = []
+
         for rec in records:
             result = rec.get("result", {})
-            rows.append({f: result.get(f) for f in field_names})
-        return rows, field_names
+
+            # Check if any field in this record is a nested array of dicts
+            nested_key = None
+            nested_val = None
+            for k, v in result.items():
+                if isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict):
+                    nested_key = k
+                    nested_val = v
+                    break
+
+            if nested_key and nested_val:
+                if not item_field_names or array_key_used != nested_key:
+                    array_key_used = nested_key
+                    for item in nested_val:
+                        for k in item.keys():
+                            if k not in item_field_names:
+                                item_field_names.append(k)
+
+                top_vals = {f: result.get(f) for f in top_field_names if f != nested_key}
+                for item in nested_val:
+                    row = dict(top_vals)
+                    row.update({k: item.get(k) for k in item_field_names})
+                    rows.append(row)
+            else:
+                rows.append({f: result.get(f) for f in top_field_names})
+
+        final_fields = [f for f in top_field_names if f != array_key_used] + item_field_names
+        return rows, final_fields
 
     # Single-record mode: { result: {...}, schema_fields: [...] }
     if "result" in job_result:
@@ -64,14 +94,14 @@ def _extract_rows(job_result: dict) -> tuple[list[dict], list[str]]:
             # Top-level fields (everything except the array)
             top_fields = {k: v for k, v in result.items() if k != array_key}
             # Get all keys from the array items
-            item_keys = []
+            item_keys: list[str] = []
             for item in array_val:
                 for k in item.keys():
                     if k not in item_keys:
                         item_keys.append(k)
 
-            # Build field names: top-level first, then item fields
-            top_field_names = list(top_fields.keys())
+            # Build field names: top-level first (excluding array key), then item fields
+            top_field_names = [f for f in (schema_fields if schema_fields else list(top_fields.keys())) if f != array_key]
             field_names = top_field_names + item_keys
 
             # One row per model/item, with top-level fields repeated

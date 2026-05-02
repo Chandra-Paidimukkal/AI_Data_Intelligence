@@ -550,9 +550,18 @@ def _collect_all_rows(batch: ExtractionBatch, db: Session) -> tuple[list[dict], 
     Collect all rows from all completed jobs in the batch.
     Returns (rows, field_names).
     Each row includes a 'source_file' column for traceability.
-    Handles nested model arrays (e.g. result.models, result.items, result.products).
+
+    Handles three result shapes:
+      1. Multi-record: { records: [{result, confidence}, ...] }
+         → one row per record, top-level schema fields as columns
+      2. Single-record with nested model array: { result: { models: [{...},...], ...top_fields } }
+         → one row per model item, top-level fields repeated, model sub-fields as columns
+      3. Plain single-record: { result: { field: value, ... } }
+         → one row per job
     """
-    field_names: list[str] = []
+    top_field_names: list[str] = []   # schema-level fields (non-array)
+    item_field_names: list[str] = []  # sub-fields inside the nested array (e.g. ModelNumber, etc.)
+    array_key_used: str | None = None
     all_rows: list[dict] = []
 
     for job_id in (batch.job_ids or []):
@@ -563,64 +572,98 @@ def _collect_all_rows(batch: ExtractionBatch, db: Session) -> tuple[list[dict], 
         result = job.result
         source_file = result.get("source_file", "")
 
-        # Get schema field names from first job
-        if not field_names:
-            field_names = result.get("schema_fields", [])
-
-        # Multi-record result: { records: [{result, confidence}, ...] }
+        # ── Shape 1: multi-record (LandingAI records list) ────────────────────
         if "records" in result:
+            schema_fields = result.get("schema_fields", [])
+            if not top_field_names:
+                top_field_names = schema_fields
+
             for rec in result["records"]:
                 rec_result = rec.get("result", {})
                 rec_source = rec.get("source_file", source_file)
-                row = {"source_file": rec_source}
-                row.update({f: rec_result.get(f) for f in field_names})
-                all_rows.append(row)
 
-        # Single-record result: { result: {...} }
+                # Each record may itself have a nested array (e.g. models inside a record)
+                nested_key = None
+                nested_val = None
+                for k, v in rec_result.items():
+                    if isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict):
+                        nested_key = k
+                        nested_val = v
+                        break
+
+                if nested_key and nested_val:
+                    # Collect sub-field names
+                    if not item_field_names or array_key_used != nested_key:
+                        array_key_used = nested_key
+                        for item in nested_val:
+                            for k in item.keys():
+                                if k not in item_field_names:
+                                    item_field_names.append(k)
+
+                    top_vals = {f: rec_result.get(f) for f in top_field_names if f != nested_key}
+                    for item in nested_val:
+                        row = {"source_file": rec_source}
+                        row.update(top_vals)
+                        row.update({k: item.get(k) for k in item_field_names})
+                        all_rows.append(row)
+                else:
+                    row = {"source_file": rec_source}
+                    row.update({f: rec_result.get(f) for f in top_field_names})
+                    all_rows.append(row)
+
+        # ── Shape 2 & 3: single-record ────────────────────────────────────────
         elif "result" in result:
             rec_result = result.get("result", {})
+            schema_fields = result.get("schema_fields", list(rec_result.keys()))
 
-            # Check for nested array of models (e.g. rec_result["models"] = [{...}, ...])
-            array_key = None
-            array_val = None
+            # Find the first field that is a list of dicts (nested model array)
+            nested_key = None
+            nested_val = None
             for k, v in rec_result.items():
                 if isinstance(v, list) and len(v) > 0 and isinstance(v[0], dict):
-                    array_key = k
-                    array_val = v
+                    nested_key = k
+                    nested_val = v
                     break
 
-            if array_key and array_val:
-                # Top-level fields repeated on every row
-                top_fields = {k: v for k, v in rec_result.items() if k != array_key}
-                # Collect all item-level keys
-                item_keys: list[str] = []
-                for item in array_val:
-                    for k in item.keys():
-                        if k not in item_keys:
-                            item_keys.append(k)
-                # Update field_names if not yet set
-                if not field_names:
-                    field_names = list(top_fields.keys()) + item_keys
+            if nested_key and nested_val:
+                # Top-level fields = everything except the array field
+                top_vals = {k: v for k, v in rec_result.items() if k != nested_key}
 
-                for item in array_val:
+                # Collect sub-field names from all items
+                if not item_field_names or array_key_used != nested_key:
+                    array_key_used = nested_key
+                    for item in nested_val:
+                        for k in item.keys():
+                            if k not in item_field_names:
+                                item_field_names.append(k)
+
+                # Top-level schema fields (excluding the array key)
+                if not top_field_names:
+                    top_field_names = [f for f in schema_fields if f != nested_key]
+
+                for item in nested_val:
                     row = {"source_file": source_file}
-                    row.update({k: top_fields.get(k) for k in top_fields})
-                    row.update({k: item.get(k) for k in item_keys})
+                    row.update({k: top_vals.get(k) for k in top_field_names})
+                    row.update({k: item.get(k) for k in item_field_names})
                     all_rows.append(row)
             else:
+                # Plain single record — no nested arrays
+                if not top_field_names:
+                    top_field_names = schema_fields
                 row = {"source_file": source_file}
-                row.update({f: rec_result.get(f) for f in field_names})
+                row.update({f: rec_result.get(f) for f in top_field_names})
                 all_rows.append(row)
 
-    # Build final column list: source_file first, then all field names
-    # Collect any extra keys found in rows that aren't in field_names
-    extra_keys: list[str] = []
+    # Build final column order:
+    # source_file | top-level schema fields | model sub-fields
+    all_columns = ["source_file"] + top_field_names + item_field_names
+
+    # Safety: add any extra keys found in rows that slipped through
     for row in all_rows:
         for k in row:
-            if k != "source_file" and k not in field_names and k not in extra_keys:
-                extra_keys.append(k)
+            if k not in all_columns:
+                all_columns.append(k)
 
-    all_columns = ["source_file"] + field_names + extra_keys
     return all_rows, all_columns
 
 

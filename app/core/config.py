@@ -5,7 +5,9 @@ import os
 
 
 class Settings(BaseSettings):
-    DATABASE_URL: str = "sqlite:///./doc_intel.db"
+    # On Render: set DATABASE_URL env var to "sqlite:////data/doc_intel.db"
+    # and UPLOAD_DIR to "/data/uploads" after adding a Persistent Disk at /data
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./doc_intel.db")
     SECRET_KEY: str = os.getenv("SECRET_KEY", "change-me-in-production-use-a-long-random-string-at-least-32-chars")
     UPLOAD_DIR: str = os.getenv("UPLOAD_DIR", "./uploads")
     MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "100"))

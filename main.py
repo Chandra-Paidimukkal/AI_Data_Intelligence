@@ -15,13 +15,10 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS — allow frontend origin from env var, fallback to all for dev
-_frontend_url = os.getenv("FRONTEND_URL", "")
-_cors_origins = [_frontend_url, "https://ai-data-intelligence-1.onrender.com"] if _frontend_url else ["*"]
-
+# CORS — always allow all origins (credentials=False is required with wildcard)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=_cors_origins,
+    allow_origins=["*"],
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

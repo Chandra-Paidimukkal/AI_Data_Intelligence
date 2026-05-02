@@ -342,6 +342,145 @@ async def _process_batch(
         db.close()
 
 
+# ── List all batches ──────────────────────────────────────────────────────────
+
+@router.get("", tags=["Extraction"])
+async def list_batches(db: Session = Depends(get_db)):
+    """List all batch sessions with status and job count."""
+    from app.models.job import ExtractionBatch
+    batches = db.query(ExtractionBatch).order_by(ExtractionBatch.created_at.desc()).limit(100).all()
+    return {"batches": [
+        {
+            "batch_id": b.id,
+            "schema_id": b.schema_id,
+            "status": b.status,
+            "total": b.total,
+            "completed": b.completed,
+            "failed": b.failed,
+            "job_ids": b.job_ids or [],
+            "created_at": b.created_at.isoformat() if b.created_at else None,
+        }
+        for b in batches
+    ]}
+
+
+# ── Upload ZIP and run batch ──────────────────────────────────────────────────
+
+@router.post("/run-from-zip", tags=["Documents"])
+async def run_batch_from_zip(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(..., description="ZIP file containing PDFs"),
+    schema_id: str = Form(..., description="ID of a saved schema"),
+    provider: str = Form(default="landingai"),
+    api_key: str = Form(default=""),
+    base_url: str = Form(default=""),
+    model: str = Form(default=""),
+    multi_record: bool = Form(default=True),
+    db: Session = Depends(get_db),
+):
+    """
+    Upload a ZIP file containing PDFs.
+    Extracts all PDFs from the ZIP, parses them, and runs batch extraction.
+    """
+    import zipfile
+
+    if not file.filename or not file.filename.lower().endswith(".zip"):
+        raise HTTPException(400, "File must be a .zip archive.")
+
+    schema_def = db.query(SchemaDefinition).filter(SchemaDefinition.id == schema_id).first()
+    if not schema_def:
+        raise HTTPException(404, f"Schema '{schema_id}' not found.")
+    schema_dict = schema_def.raw_definition or {"name": schema_def.name, "fields": schema_def.fields}
+
+    # Save the ZIP temporarily
+    zip_id = str(uuid.uuid4())
+    zip_path = os.path.join(settings.UPLOAD_DIR, f"{zip_id}.zip")
+    with open(zip_path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+
+    # Extract PDFs from ZIP
+    doc_ids = []
+    try:
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            pdf_names = [
+                name for name in zf.namelist()
+                if not name.startswith("__MACOSX") and not name.startswith(".")
+                and name.lower().endswith((".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".docx", ".xlsx"))
+            ]
+            if not pdf_names:
+                raise HTTPException(400, "ZIP contains no supported files (PDF, PNG, JPG, DOCX, XLSX).")
+
+            for name in pdf_names:
+                doc_id = str(uuid.uuid4())
+                ext = Path(name).suffix or ".pdf"
+                fpath = os.path.join(settings.UPLOAD_DIR, f"{doc_id}{ext}")
+                with zf.open(name) as src, open(fpath, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+
+                basename = Path(name).name
+                doc = Document(
+                    id=doc_id,
+                    file_name=basename,
+                    file_path=fpath,
+                    file_size=os.path.getsize(fpath),
+                    mime_type="application/pdf",
+                    status="uploaded",
+                )
+                db.add(doc)
+                doc_ids.append((doc_id, fpath, basename))
+    except zipfile.BadZipFile:
+        raise HTTPException(400, "Invalid ZIP file.")
+    finally:
+        # Clean up the ZIP
+        try:
+            os.remove(zip_path)
+        except Exception:
+            pass
+
+    if not doc_ids:
+        raise HTTPException(400, "No valid files found in ZIP.")
+
+    db.commit()
+
+    # Create batch
+    batch_id = str(uuid.uuid4())
+    batch = ExtractionBatch(
+        id=batch_id,
+        schema_id=schema_id,
+        document_ids=[d[0] for d in doc_ids],
+        job_ids=[],
+        status="running",
+        total=len(doc_ids),
+        completed=0,
+        failed=0,
+    )
+    db.add(batch)
+    db.commit()
+
+    provider_config = {
+        "provider": provider, "api_key": api_key,
+        "base_url": base_url, "model": model,
+    }
+    background_tasks.add_task(
+        _process_batch,
+        batch_id=batch_id,
+        doc_ids=doc_ids,
+        schema_dict=schema_dict,
+        schema_id=schema_id,
+        provider_config=provider_config,
+        multi_record=multi_record,
+    )
+
+    return {
+        "batch_id": batch_id,
+        "total_files": len(doc_ids),
+        "status": "running",
+        "message": f"Extracted {len(doc_ids)} file(s) from ZIP. Processing in background.",
+        "poll_url": f"/api/v1/batch/{batch_id}",
+        "export_url": f"/api/v1/batch/{batch_id}/excel",
+    }
+
+
 # ── Status ────────────────────────────────────────────────────────────────────
 
 @router.get("/{batch_id}", tags=["Extraction"])

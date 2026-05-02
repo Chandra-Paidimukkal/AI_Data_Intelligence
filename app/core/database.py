@@ -3,15 +3,18 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
-# Build engine — SQLite needs check_same_thread=False, Postgres does not
-_is_sqlite = "sqlite" in settings.DATABASE_URL
+_db_url = settings.DATABASE_URL
+_is_sqlite = "sqlite" in _db_url
+
+# Supabase / any external Postgres requires SSL
+if not _is_sqlite and "sslmode" not in _db_url:
+    _db_url = _db_url + ("&" if "?" in _db_url else "?") + "sslmode=require"
 
 engine = create_engine(
-    settings.DATABASE_URL,
+    _db_url,
     connect_args={"check_same_thread": False} if _is_sqlite else {},
-    # For Postgres: use a connection pool suitable for a web app
-    pool_pre_ping=True,  # detect stale connections
-    pool_recycle=300 if not _is_sqlite else -1,  # recycle every 5 min for Postgres
+    pool_pre_ping=True,
+    pool_recycle=300 if not _is_sqlite else -1,
 )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

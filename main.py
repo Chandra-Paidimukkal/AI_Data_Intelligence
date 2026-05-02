@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+import os
 from app.core.config import settings
 from app.core.database import init_db
 from app.api.v1.router import api_router
@@ -14,9 +15,13 @@ app = FastAPI(
     version="2.0.0"
 )
 
+# CORS — allow frontend origin from env var, fallback to all for dev
+_frontend_url = os.getenv("FRONTEND_URL", "")
+_cors_origins = [_frontend_url] if _frontend_url else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],

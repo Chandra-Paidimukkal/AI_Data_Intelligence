@@ -15,7 +15,7 @@ app = FastAPI(
     version="2.0.0"
 )
 
-# CORS — always allow all origins (credentials=False is required with wildcard)
+# CORS — allow all origins including localhost dev
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],

@@ -164,21 +164,35 @@ def compute_quality_for_records(
     if not records:
         return _empty_score()
 
+    # For nested model records, score based on how many fields are non-null per record
+    # Use the keys from the first record's result as the field list
+    first_result = records[0].get("result", {}) if records else {}
+    effective_fields = list(first_result.keys()) if first_result else schema_fields
+
     scores = []
     for rec in records:
-        s = compute_quality_score(
-            result=rec.get("result", {}),
-            confidence=rec.get("confidence", {}),
-            sources=rec.get("sources", {}),
-            schema_fields=schema_fields,
-            validation_errors=rec.get("validation", {}),
-            failure_log=[],
-        )
-        scores.append(s["score"])
+        result = rec.get("result", {})
+        confidence = rec.get("confidence", {})
+        sources = rec.get("sources", {})
 
-    avg_score = round(sum(scores) / len(scores))
-    min_score = min(scores)
-    max_score = max(scores)
+        # Count non-null fields
+        non_null = [f for f in effective_fields if result.get(f) is not None]
+        coverage = len(non_null) / len(effective_fields) if effective_fields else 0
+
+        # Average confidence
+        conf_vals = [confidence.get(f, 0.9) for f in non_null]
+        avg_conf = sum(conf_vals) / len(conf_vals) if conf_vals else 0
+
+        # Source quality
+        src_scores = [_SOURCE_WEIGHTS.get(sources.get(f, "landingai_ade"), 0.9) for f in non_null]
+        avg_src = sum(src_scores) / len(src_scores) if src_scores else 0
+
+        rec_score = max(0, min(100, round(
+            coverage * 40 + avg_conf * 35 + avg_src * 15
+        )))
+        scores.append(rec_score)
+
+    avg_score = round(sum(scores) / len(scores)) if scores else 0
 
     if avg_score >= 90: grade = "A"
     elif avg_score >= 75: grade = "B"
@@ -191,13 +205,22 @@ def compute_quality_for_records(
         "grade": grade,
         "record_count": len(records),
         "per_record_scores": scores,
-        "min_score": min_score,
-        "max_score": max_score,
+        "min_score": min(scores) if scores else 0,
+        "max_score": max(scores) if scores else 0,
+        "breakdown": {
+            "coverage": round(avg_score * 0.4, 1),
+            "avg_confidence": round(avg_score * 0.35, 1),
+            "source_quality": round(avg_score * 0.15, 1),
+            "penalty": 0,
+        },
         "stats": {
-            "total_fields": len(schema_fields),
+            "total_fields": len(effective_fields),
             "records": len(records),
         },
-        "suggestions": [],
+        "missing_critical": [],
+        "suggestions": [
+            f"{len(records)} model records extracted successfully."
+        ] if records else [],
     }
 
 

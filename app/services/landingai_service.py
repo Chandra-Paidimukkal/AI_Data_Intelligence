@@ -331,12 +331,17 @@ def _merge_multi_results(results: list[dict], schema: dict) -> dict:
     all_records = _deduplicate_records(all_records, field_names)
     all_records = _fix_zero_nulls(all_records, field_names)
 
+    # Compute quality score
+    from app.services.quality_scorer import compute_quality_for_records
+    quality = compute_quality_for_records(all_records, field_names)
+
     return {
         "records": all_records,
         "total_records": len(all_records),
         "schema_fields": field_names,
         "failure_log": failure_log,
         "duration_seconds": round(total_duration, 2),
+        "quality": quality,
     }
 
 
@@ -475,12 +480,17 @@ def _ade_multi_response_to_pipeline_result(response_json: dict, schema: dict) ->
     # Post-process: fix zero values that should be null for certain fields
     records = _fix_zero_nulls(records, field_names)
 
+    # Compute quality score across all records
+    from app.services.quality_scorer import compute_quality_for_records
+    quality = compute_quality_for_records(records, field_names)
+
     return {
         "records": records,
         "total_records": len(records),
         "schema_fields": field_names,
         "failure_log": failure_log,
         "duration_seconds": round(duration, 2),
+        "quality": quality,
     }
 
 

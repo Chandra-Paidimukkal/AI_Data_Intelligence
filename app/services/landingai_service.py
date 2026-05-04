@@ -156,6 +156,28 @@ async def _extract_chunks_parallel(
 
 # ── Single chunk extraction ───────────────────────────────────────────────────
 
+def _convert_fractions_in_markdown(markdown: str) -> str:
+    """
+    Convert fractional inch measurements like 13-3/4" to decimals (13.75")
+    so LandingAI can extract them as numbers.
+    Also converts standalone fractions like 3/4 → 0.75
+    """
+    import re
+
+    def frac_to_decimal(m):
+        whole = int(m.group(1)) if m.group(1) else 0
+        num = int(m.group(2))
+        den = int(m.group(3))
+        val = whole + num / den
+        return f"{val:.4f}".rstrip('0').rstrip('.')
+
+    # Pattern: 13-3/4 or 13 3/4
+    markdown = re.sub(r'(\d+)[-\s](\d+)/(\d+)', frac_to_decimal, markdown)
+    # Pattern: standalone 3/4
+    markdown = re.sub(r'\b(\d+)/(\d+)\b', lambda m: f"{int(m.group(1))/int(m.group(2)):.4f}".rstrip('0').rstrip('.'), markdown)
+    return markdown
+
+
 async def _extract_chunk(
     markdown: str,
     schema: dict,
@@ -164,6 +186,8 @@ async def _extract_chunk(
 ) -> dict:
     """Extract a single chunk — single record mode. Retries once on timeout."""
     import httpx
+    # Convert fractional measurements to decimals for better extraction
+    markdown = _convert_fractions_in_markdown(markdown)
     ade_schema = _schema_to_ade_format(schema)
     url, headers = _build_request(api_key, environment)
     files = {"markdown": ("upload.md", markdown.encode("utf-8"), "text/markdown")}
@@ -192,6 +216,8 @@ async def _extract_chunk_multi(
 ) -> dict:
     """Extract a single chunk — multi-record mode. Retries once on timeout."""
     import httpx
+    # Convert fractional measurements to decimals for better extraction
+    markdown = _convert_fractions_in_markdown(markdown)
     field_schema = _schema_to_ade_format(schema)
     array_schema = {
         "type": "object",
@@ -587,22 +613,65 @@ def _schema_to_ade_format(schema: dict) -> dict:
         "boolean": "boolean", "date": "string", "currency": "number",
         "email": "string", "phone": "string", "url": "string",
     }
+
+    # Enhanced descriptions for diagram fields — tell LandingAI exactly where to look
+    diagram_field_hints = {
+        "Length_Diagram": (
+            "Extract equipment length/depth in inches ONLY from the [DIAGRAM DIMENSIONS] section "
+            "or dimensional drawing annotations. Look for the horizontal measurement labeled as "
+            "depth or length (front-to-back dimension). Convert fractions like 13-3/4 to decimal (13.75). "
+            "Convert mm to inches if needed (divide by 25.4). Return NULL if not in a diagram."
+        ),
+        "Width_Diagram": (
+            "Extract equipment width in inches ONLY from the [DIAGRAM DIMENSIONS] section "
+            "or dimensional drawing annotations. Look for the horizontal measurement labeled as "
+            "width (side-to-side dimension). Convert fractions like 36-5/16 to decimal (36.3125). "
+            "Convert mm to inches if needed. Return NULL if not in a diagram."
+        ),
+        "Height_Diagram": (
+            "Extract equipment height in inches ONLY from the [DIAGRAM DIMENSIONS] section "
+            "or dimensional drawing annotations. Look for the vertical measurement. "
+            "Convert fractions like 35-1/32 to decimal (35.03125). "
+            "Convert mm to inches if needed. Return NULL if not in a diagram."
+        ),
+        "Diameter_Diagram": (
+            "Extract equipment diameter in inches ONLY from the [DIAGRAM DIMENSIONS] section "
+            "or dimensional drawing annotations. Look for circular/round duct measurements. "
+            "Convert fractions to decimal. Convert mm to inches if needed. Return NULL if not found."
+        ),
+    }
+
     properties: dict = {}
     for field in schema.get("fields", []):
         fname = field["name"]
         ftype = field.get("type", "string")
-        desc = field.get("description") or field.get("instruction") or fname.replace("_", " ")
+        # Use enhanced diagram description if available, otherwise use field description
+        desc = diagram_field_hints.get(fname) or field.get("description") or field.get("instruction") or fname.replace("_", " ")
 
         if ftype == "list":
             sub_fields = field.get("fields", [])
             if sub_fields:
-                sub_props = {sf["name"]: {"type": type_map.get(sf.get("type", "string"), "string"), "description": sf.get("description", sf["name"])} for sf in sub_fields}
+                sub_props = {}
+                for sf in sub_fields:
+                    sfname = sf["name"]
+                    sf_desc = diagram_field_hints.get(sfname) or sf.get("description", sfname)
+                    sub_props[sfname] = {
+                        "type": type_map.get(sf.get("type", "string"), "string"),
+                        "description": sf_desc
+                    }
                 properties[fname] = {"type": "array", "items": {"type": "object", "properties": sub_props}, "description": desc}
             else:
                 properties[fname] = {"type": "array", "items": {"type": "string"}, "description": desc}
         elif ftype == "object":
             sub_fields = field.get("fields", [])
-            sub_props = {sf["name"]: {"type": type_map.get(sf.get("type", "string"), "string"), "description": sf.get("description", sf["name"])} for sf in sub_fields}
+            sub_props = {}
+            for sf in sub_fields:
+                sfname = sf["name"]
+                sf_desc = diagram_field_hints.get(sfname) or sf.get("description", sfname)
+                sub_props[sfname] = {
+                    "type": type_map.get(sf.get("type", "string"), "string"),
+                    "description": sf_desc
+                }
             properties[fname] = {"type": "object", "properties": sub_props, "description": desc}
         else:
             # Allow null for all scalar fields so Landing AI doesn't raise schema violations

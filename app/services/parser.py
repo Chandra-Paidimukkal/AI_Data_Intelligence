@@ -270,6 +270,15 @@ def _parse_pdf_pymupdf(file_path: str) -> dict:
     # Deduplicate document text (remove repeated paragraphs from multi-column layouts)
     document_text = _deduplicate_text(document_text)
     tables = _chunks_to_tables(all_chunks)
+
+    # ── Transpose column-oriented spec tables ─────────────────────────────────
+    # Many HVAC spec sheets have models as columns and specs as rows.
+    # Convert these to a model-per-row format and append to markdown.
+    transposed_section = _transpose_spec_tables(tables)
+    if transposed_section:
+        full_markdown += "\n\n<!-- PAGE BREAK -->\n\n" + transposed_section
+    # ──────────────────────────────────────────────────────────────────────────
+
     kv_pairs = _extract_kv_from_text(document_text)
     sections = _detect_sections(document_text)
 
@@ -723,6 +732,83 @@ def _extract_kv_from_text(text: str) -> list:
             seen.add(key_lower)
 
     return kv
+
+
+def _transpose_spec_tables(tables: list) -> str:
+    """
+    Detect and transpose column-oriented specification tables where:
+    - Row 0 = model numbers (columns)
+    - Rows 1..N = spec names with values per model
+
+    Converts to a readable per-model text block like:
+      Model: X24K-A
+        Approximate Shipping Weight, lbs: 87
+        Height, "H", in.: 43-5/16
+        Width, "W", in.: 14-3/16
+        ...
+
+    This makes it much easier for LandingAI to extract per-model specs.
+    """
+    _MODEL_RE = re.compile(
+        r'\b[A-Z]\d{2}[A-Z]?[-K]?[A-Z]?\b'   # e.g. X24K-A, X30K-B
+        r'|B6BMM[A-Z0-9\-]+'                   # e.g. B6BMMX24K-A
+        r'|\d{4,5}[A-Z]{1,3}'                  # e.g. 2RHCC30
+        r'|[A-Z]{1,4}\d{2,4}[A-Z]{0,3}'       # e.g. L100EL, ECG-48R
+    )
+
+    result_sections = []
+
+    for table in tables:
+        headers = table.get("headers", [])
+        rows = table.get("rows", [])
+
+        if not headers or not rows:
+            continue
+
+        # Check if this looks like a column-oriented spec table:
+        # - First header is a label like "Model Number" or empty
+        # - Remaining headers look like model numbers
+        if len(headers) < 3:
+            continue
+
+        model_headers = headers[1:]  # skip first column (spec name column)
+        model_count = sum(1 for h in model_headers if h and _MODEL_RE.search(str(h)))
+
+        # Need at least 2 model columns to be a spec table
+        if model_count < 2:
+            continue
+
+        # Build per-model spec blocks
+        model_specs: dict = {h: {} for h in model_headers if h}
+
+        for row in rows:
+            if not row:
+                continue
+            spec_name = str(row[0]).strip() if row else ""
+            if not spec_name:
+                continue
+
+            for col_idx, model_header in enumerate(model_headers):
+                if not model_header:
+                    continue
+                val_idx = col_idx + 1
+                val = str(row[val_idx]).strip() if val_idx < len(row) else ""
+                if val and val not in ("-", "n/a", "N/A", ""):
+                    model_specs[model_header][spec_name] = val
+
+        # Format as readable text
+        if model_specs:
+            lines = ["[TRANSPOSED SPECIFICATION TABLE]"]
+            for model, specs in model_specs.items():
+                if not specs:
+                    continue
+                lines.append(f"\nModel: {model}")
+                for spec_name, val in specs.items():
+                    lines.append(f"  {spec_name}: {val}")
+            if len(lines) > 2:
+                result_sections.append("\n".join(lines))
+
+    return "\n\n".join(result_sections)
 
 
 def _deduplicate_text(text: str) -> str:

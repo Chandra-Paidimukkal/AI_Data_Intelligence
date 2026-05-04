@@ -1,9 +1,9 @@
-"""
-chat.py — Platform-aware AI chatbot with vision/document upload support.
+﻿"""
+chat.py â€” Platform-aware AI chatbot with vision/document upload support.
 
-POST /api/v1/chat          — Full response
-POST /api/v1/chat/stream   — SSE streaming
-POST /api/v1/chat/upload   — Upload image/doc for vision analysis
+POST /api/v1/chat          â€” Full response
+POST /api/v1/chat/stream   â€” SSE streaming
+POST /api/v1/chat/upload   â€” Upload image/doc for vision analysis
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from loguru import logger
 
 router = APIRouter(prefix="/chat", tags=["Chat"])
 
-# ── Request models ────────────────────────────────────────────────────────────
+# â”€â”€ Request models â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class ChatMessage(BaseModel):
     role: str  # "user" or "assistant"
@@ -54,7 +54,7 @@ class ChatRequest(BaseModel):
     schema_id: Optional[str] = None
 
 
-# ── Upload endpoint ───────────────────────────────────────────────────────────
+# â”€â”€ Upload endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/upload")
 async def upload_chat_file(file: UploadFile = File(...)):
@@ -174,11 +174,11 @@ def _build_user_content(message: str, attachments: list, provider: str) -> objec
             if att.type == "document":
                 extra += f"\n\n--- Attached document: {att.name} ---\n{att.data}\n---"
             else:
-                extra += f"\n\n[Image attached: {att.name} — vision not supported for this provider]"
+                extra += f"\n\n[Image attached: {att.name} â€” vision not supported for this provider]"
         return message + extra
 
 
-# ── System prompt builder ─────────────────────────────────────────────────────
+# â”€â”€ System prompt builder â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _build_system_prompt(
     job: Optional[ExtractionJob],
@@ -186,16 +186,20 @@ def _build_system_prompt(
     schema: Optional[SchemaDefinition],
 ) -> str:
     parts = [
-        "You are an intelligent assistant for the AI Document Intelligence Platform — "
-        "a system that extracts structured data from industrial and commercial equipment spec sheets using AI.\n\n"
-        "You help users with:\n"
+        "You are a highly capable AI assistant â€” like ChatGPT, Gemini, or Claude. "
+        "You can answer ANY question on ANY topic: science, technology, history, coding, math, "
+        "business, health, AI, machine learning, general knowledge, creative writing, and more.\n\n"
+        "You are also embedded in the AQT Data Intelligence Platform â€” an AI-powered document "
+        "extraction system for industrial equipment spec sheets. When users ask about the platform, "
+        "you can help with:\n"
         "- Understanding extraction results and confidence scores\n"
         "- Diagnosing why fields are null or have low confidence\n"
         "- Building and improving extraction schemas\n"
         "- Understanding document content\n"
-        "- Comparing AI engine results\n"
-        "- General questions about HVAC, industrial equipment, and specifications\n\n"
-        "Be concise, accurate, and helpful. Use markdown formatting for clarity."
+        "- Comparing AI engine results\n\n"
+        "IMPORTANT: Never say you can only answer platform questions. Answer ALL questions fully "
+        "and helpfully, just like ChatGPT or Gemini would. Be concise, accurate, and use markdown "
+        "formatting for clarity."
     ]
 
     # Add document context
@@ -280,7 +284,7 @@ def _build_system_prompt(
     return "\n".join(parts)
 
 
-# ── Non-streaming endpoint ────────────────────────────────────────────────────
+# â”€â”€ Non-streaming endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("")
 async def chat(req: ChatRequest, db: Session = Depends(get_db)):
@@ -295,7 +299,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
 
     system_prompt = _build_system_prompt(job, doc, schema)
 
-    # Build messages — support vision (image attachments) for GPT-4o
+    # Build messages â€” support vision (image attachments) for GPT-4o
     messages = [{"role": "system", "content": system_prompt}]
     for h in req.history[-10:]:
         messages.append({"role": h.role, "content": h.content})
@@ -309,7 +313,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
     try:
         import httpx
 
-        # ── OpenAI / ChatGPT ──────────────────────────────────────────────────
+        # â”€â”€ OpenAI / ChatGPT â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         if provider in ("openai", "chatgpt"):
             model = req.model or "gpt-4o"
             headers = {
@@ -332,9 +336,9 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
                 reply = data["choices"][0]["message"]["content"]
                 usage = data.get("usage", {})
 
-        # ── Google Gemini ─────────────────────────────────────────────────────
+        # â”€â”€ Google Gemini â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif provider == "gemini":
-            model = req.model or "gemini-1.5-flash"
+            model = req.model or "gemini-2.0-flash"
             # Gemini uses a different message format; combine history into user message
             user_message = req.message
             if req.history:
@@ -358,7 +362,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
                 reply = r.json()["candidates"][0]["content"]["parts"][0]["text"]
                 usage = {}
 
-        # ── Anthropic Claude ──────────────────────────────────────────────────
+        # â”€â”€ Anthropic Claude â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif provider == "anthropic":
             model = req.model or "claude-3-5-haiku-20241022"
             headers = {
@@ -387,7 +391,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
                 reply = r.json()["content"][0]["text"]
                 usage = {}
 
-        # ── Groq ──────────────────────────────────────────────────────────────
+        # â”€â”€ Groq â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif provider == "groq":
             model = req.model or "llama-3.1-8b-instant"
             headers = {
@@ -410,7 +414,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
                 reply = data["choices"][0]["message"]["content"]
                 usage = data.get("usage", {})
 
-        # ── Perplexity ────────────────────────────────────────────────────────
+        # â”€â”€ Perplexity â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif provider == "perplexity":
             model = req.model or "llama-3.1-sonar-large-128k-online"
             headers = {
@@ -433,7 +437,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
                 reply = data["choices"][0]["message"]["content"]
                 usage = data.get("usage", {})
 
-        # ── Emergence AI ──────────────────────────────────────────────────────
+        # â”€â”€ Emergence AI â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         elif provider == "emergence":
             model = req.model or "em-llm-001"
             headers = {
@@ -477,7 +481,7 @@ async def chat(req: ChatRequest, db: Session = Depends(get_db)):
         raise HTTPException(500, f"Chat failed: {e}")
 
 
-# ── Streaming endpoint ────────────────────────────────────────────────────────
+# â”€â”€ Streaming endpoint â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 @router.post("/stream")
 async def chat_stream(req: ChatRequest, db: Session = Depends(get_db)):
@@ -502,11 +506,11 @@ async def chat_stream(req: ChatRequest, db: Session = Depends(get_db)):
     async def generate() -> AsyncGenerator[str, None]:
         import httpx
 
-        # ── Non-OpenAI providers: do a regular request, emit as single chunk ──
+        # â”€â”€ Non-OpenAI providers: do a regular request, emit as single chunk â”€â”€
         if provider not in ("openai", "chatgpt"):
             try:
                 if provider == "gemini":
-                    model = req.model or "gemini-1.5-flash"
+                    model = req.model or "gemini-2.0-flash"
                     user_message = req.message
                     if req.history:
                         history_text = "\n".join(
@@ -629,7 +633,7 @@ async def chat_stream(req: ChatRequest, db: Session = Depends(get_db)):
                 yield f"data: {json.dumps({'error': str(e)})}\n\n"
             return
 
-        # ── OpenAI true SSE streaming ─────────────────────────────────────────
+        # â”€â”€ OpenAI true SSE streaming â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
         headers = {
             "Authorization": f"Bearer {req.api_key}",
             "Content-Type": "application/json",

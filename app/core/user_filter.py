@@ -15,8 +15,8 @@ from app.models.user import User
 def filter_by_user(query: Query, user: Optional[User], model) -> Query:
     """
     Filter a SQLAlchemy query to only return records owned by the user.
-    Admins see all records. Non-admins only see their own.
-    Records with user_id=None are treated as shared/system records visible to all.
+    Admins see all records. Non-admins only see their own records.
+    Strict isolation — records with user_id=None are NOT shown to regular users.
     """
     if user is None:
         # No auth — return nothing
@@ -24,17 +24,15 @@ def filter_by_user(query: Query, user: Optional[User], model) -> Query:
     if user.is_admin:
         # Admins see everything
         return query
-    # Regular users see their own + shared (user_id is null)
-    return query.filter(
-        (model.user_id == user.id) | (model.user_id == None)  # noqa: E711
-    )
+    # Regular users see ONLY their own records
+    return query.filter(model.user_id == user.id)
 
 
 def owned_by(user: Optional[User], record) -> bool:
-    """Check if a user owns a record (or is admin, or record is shared)."""
+    """Check if a user owns a record (or is admin)."""
     if user is None:
         return False
     if user.is_admin:
         return True
     record_user_id = getattr(record, "user_id", None)
-    return record_user_id is None or record_user_id == user.id
+    return record_user_id == user.id

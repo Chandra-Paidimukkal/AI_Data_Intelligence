@@ -60,7 +60,11 @@ async def create_schema(
 
 
 @router.post("/upload")
-async def upload_schema_file(file: UploadFile = File(...), db: Session = Depends(get_db)):
+async def upload_schema_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
     Upload a schema JSON file in ANY format.
     Accepts: our native format, JSON Schema, OpenAPI-style, flat key-value,
@@ -80,6 +84,7 @@ async def upload_schema_file(file: UploadFile = File(...), db: Session = Depends
     schema_id = str(uuid.uuid4())
     schema = SchemaDefinition(
         id=schema_id,
+        user_id=current_user.id if current_user else None,
         name=normalized["name"],
         description=normalized.get("description", ""),
         version=normalized.get("version", "1.0"),

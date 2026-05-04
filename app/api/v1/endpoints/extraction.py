@@ -136,33 +136,46 @@ async def run_extraction_endpoint(
 
             environment = req.provider_config.base_url or "production"
             multi_record = req.options.get("multi_record", False)
+            vision_parse = req.options.get("vision_parse", False)
             markdown = doc.parsed_data.get("markdown", "")
 
-            # Only re-parse with LandingAI vision if the stored markdown
-            # has a DIMENSIONS section but no actual dimension numbers
-            # (meaning the diagram values are image-only and PyMuPDF missed them)
-            import re as _re
-            has_dimensions_label = bool(_re.search(r'DIMENSIONS?:', markdown, _re.IGNORECASE))
-            has_dimension_numbers = bool(_re.search(
-                r'\d+[-\s]\d+/\d+["\']?|\b\d{1,3}\.\d{1,4}["\']?\s*(?:in|inch|")',
-                markdown
-            ))
-            file_path = doc.file_path
-            import os
-
-            if has_dimensions_label and not has_dimension_numbers and file_path and os.path.exists(file_path):
-                # Diagram values are image-only — use LandingAI vision parser
+            if vision_parse:
+                # User explicitly enabled vision mode — always use LandingAI vision parser
                 try:
-                    logger.info(f"Diagram-only PDF detected, re-parsing with LandingAI vision: {file_path}")
-                    landingai_parsed = await parse_with_landingai(
-                        file_path=file_path,
+                    logger.info(f"Vision mode enabled — parsing with LandingAI vision: {doc.file_path}")
+                    from app.services.vision_parser import vision_parse_document
+                    vision_markdown = await vision_parse_document(
+                        file_path=doc.file_path,
+                        provider="landingai",
                         api_key=req.provider_config.api_key,
-                        environment=environment,
+                        base_url=environment,
                     )
-                    markdown = landingai_parsed.get("markdown", "")
-                    logger.info(f"LandingAI vision markdown length: {len(markdown)}")
+                    if vision_markdown:
+                        markdown = vision_markdown
+                        logger.info(f"Vision markdown: {len(markdown)} chars")
                 except Exception as e:
-                    logger.warning(f"LandingAI vision parse failed, using stored markdown: {e}")
+                    logger.warning(f"Vision parse failed, using stored markdown: {e}")
+            else:
+                # Auto-detect: only re-parse if diagram values are image-only
+                import re as _re
+                has_dimensions_label = bool(_re.search(r'DIMENSIONS?:', markdown, _re.IGNORECASE))
+                has_dimension_numbers = bool(_re.search(
+                    r'\d+[-\s]\d+/\d+["\']?|\b\d{1,3}\.\d{1,4}["\']?\s*(?:in|inch|")',
+                    markdown
+                ))
+                file_path = doc.file_path
+                import os
+                if has_dimensions_label and not has_dimension_numbers and file_path and os.path.exists(file_path):
+                    try:
+                        logger.info(f"Diagram-only PDF detected, re-parsing with LandingAI vision: {file_path}")
+                        landingai_parsed = await parse_with_landingai(
+                            file_path=file_path,
+                            api_key=req.provider_config.api_key,
+                            environment=environment,
+                        )
+                        markdown = landingai_parsed.get("markdown", "")
+                    except Exception as e:
+                        logger.warning(f"LandingAI vision parse failed, using stored markdown: {e}")
 
             if multi_record:
                 extraction = await extract_multi_with_landingai(
@@ -179,11 +192,57 @@ async def run_extraction_endpoint(
                     environment=environment,
                 )
         else:
-            extraction = await run_extraction(
-                parsed_doc=doc.parsed_data,
-                schema=schema_dict,
-                provider_config=req.provider_config.dict(),
-            )
+            vision_parse = req.options.get("vision_parse", False)
+            multi_record = req.options.get("multi_record", False)
+
+            if vision_parse and provider in ("openai", "chatgpt", "anthropic", "gemini"):
+                # Vision mode for non-LandingAI providers
+                try:
+                    import os
+                    if doc.file_path and os.path.exists(doc.file_path):
+                        logger.info(f"Vision mode enabled for {provider} — parsing PDF as images")
+                        from app.services.vision_parser import vision_parse_document
+                        vision_markdown = await vision_parse_document(
+                            file_path=doc.file_path,
+                            provider=provider,
+                            api_key=req.provider_config.api_key,
+                            model=req.provider_config.model,
+                        )
+                        if vision_markdown:
+                            # Merge vision markdown with existing parsed data
+                            existing_markdown = doc.parsed_data.get("markdown", "")
+                            merged_parsed = dict(doc.parsed_data)
+                            merged_parsed["markdown"] = existing_markdown + "\n\n<!-- VISION PARSE -->\n\n" + vision_markdown
+                            extraction = await run_extraction(
+                                parsed_doc=merged_parsed,
+                                schema=schema_dict,
+                                provider_config=req.provider_config.dict(),
+                            )
+                        else:
+                            extraction = await run_extraction(
+                                parsed_doc=doc.parsed_data,
+                                schema=schema_dict,
+                                provider_config=req.provider_config.dict(),
+                            )
+                    else:
+                        extraction = await run_extraction(
+                            parsed_doc=doc.parsed_data,
+                            schema=schema_dict,
+                            provider_config=req.provider_config.dict(),
+                        )
+                except Exception as e:
+                    logger.warning(f"Vision parse failed for {provider}: {e}, falling back to text")
+                    extraction = await run_extraction(
+                        parsed_doc=doc.parsed_data,
+                        schema=schema_dict,
+                        provider_config=req.provider_config.dict(),
+                    )
+            else:
+                extraction = await run_extraction(
+                    parsed_doc=doc.parsed_data,
+                    schema=schema_dict,
+                    provider_config=req.provider_config.dict(),
+                )
         job.status = "completed"
         job.result = extraction
         db.commit()

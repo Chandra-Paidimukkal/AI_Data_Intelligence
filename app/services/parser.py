@@ -132,16 +132,39 @@ def _parse_pdf_pymupdf(file_path: str) -> dict:
                 }
                 page_chunks.append(chunk)
 
-            elif btype == 1:  # image block
+            elif btype == 1:  # image block — OCR it to extract dimension text
                 chunk_id = _cid()
-                img_desc = f"Figure on page {page_num + 1}"
-                md = f"<a id='{chunk_id}'></a>\n\n<::{img_desc}: figure::>"
-                chunk = {"markdown": md, "type": "figure", "id": chunk_id,
+                ocr_text = ""
+                if OCR_AVAILABLE:
+                    try:
+                        # Extract the image from the page and OCR it
+                        clip = fitz.Rect(bbox)
+                        pix = page.get_pixmap(clip=clip, dpi=200)
+                        img_data = pix.tobytes("png")
+                        img = Image.open(io.BytesIO(img_data))
+                        ocr_text = pytesseract.image_to_string(img).strip()
+                        # Filter out very short/noisy OCR results
+                        if len(ocr_text) < 3:
+                            ocr_text = ""
+                    except Exception as e:
+                        logger.debug(f"Image OCR failed page {page_num}: {e}")
+
+                if ocr_text:
+                    # Use OCR text as the chunk content so LandingAI can read dimensions
+                    md = f"<a id='{chunk_id}'></a>\n\n[DIAGRAM DIMENSIONS]\n{ocr_text}"
+                    chunk_type = "figure"
+                    ocr_used = True
+                else:
+                    img_desc = f"Figure on page {page_num + 1}"
+                    md = f"<a id='{chunk_id}'></a>\n\n<::{img_desc}: figure::>"
+                    chunk_type = "figure"
+
+                chunk = {"markdown": md, "type": chunk_type, "id": chunk_id,
                          "grounding": {"box": norm, "page": page_num}}
                 grounding[chunk_id] = {
                     "box": norm, "page": page_num,
                     "type": "chunkFigure",
-                    "confidence": None, "low_confidence_spans": []
+                    "confidence": 0.7 if ocr_text else None, "low_confidence_spans": []
                 }
                 page_chunks.append(chunk)
 

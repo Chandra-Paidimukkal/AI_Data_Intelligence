@@ -52,7 +52,7 @@ async def vision_parse_document(
         return await _vision_parse_anthropic(file_path, api_key, model or "claude-3-5-sonnet-20241022", max_pages)
 
     if provider == "gemini":
-        return await _vision_parse_gemini(file_path, api_key, model or "gemini-1.5-flash", max_pages)
+        return await _vision_parse_gemini(file_path, api_key, model or "gemini-2.0-flash", max_pages)
 
     raise ValueError(f"Vision parsing not supported for provider: {provider}. Use landingai, openai, anthropic, or gemini.")
 

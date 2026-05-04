@@ -157,7 +157,8 @@ class LLMRouter:
 
     async def _gemini(self, prompt: str, system: str) -> str:
         import httpx
-        model = self.model or "gemini-1.5-flash"
+        model = self.model or "gemini-2.0-flash"
+        # Try current model, fall back to gemini-2.0-flash if 404
         url = (
             f"https://generativelanguage.googleapis.com/v1beta/models/"
             f"{model}:generateContent?key={self.api_key}"
@@ -173,6 +174,13 @@ class LLMRouter:
         }
         async with httpx.AsyncClient(timeout=90) as client:
             r = await client.post(url, json=payload)
+            if r.status_code == 404 and model != "gemini-2.0-flash":
+                # Model not found — retry with latest stable model
+                fallback_url = (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/"
+                    f"gemini-2.0-flash:generateContent?key={self.api_key}"
+                )
+                r = await client.post(fallback_url, json=payload)
             r.raise_for_status()
             return r.json()["candidates"][0]["content"]["parts"][0]["text"]
 

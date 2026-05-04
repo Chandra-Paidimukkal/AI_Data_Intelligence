@@ -132,25 +132,22 @@ def _parse_pdf_pymupdf(file_path: str) -> dict:
                 }
                 page_chunks.append(chunk)
 
-            elif btype == 1:  # image block — OCR it to extract dimension text
+            elif btype == 1:  # image block — try OCR, fall back to placeholder
                 chunk_id = _cid()
                 ocr_text = ""
                 if OCR_AVAILABLE:
                     try:
-                        # Extract the image from the page and OCR it
                         clip = fitz.Rect(bbox)
                         pix = page.get_pixmap(clip=clip, dpi=200)
                         img_data = pix.tobytes("png")
                         img = Image.open(io.BytesIO(img_data))
                         ocr_text = pytesseract.image_to_string(img).strip()
-                        # Filter out very short/noisy OCR results
                         if len(ocr_text) < 3:
                             ocr_text = ""
                     except Exception as e:
                         logger.debug(f"Image OCR failed page {page_num}: {e}")
 
                 if ocr_text:
-                    # Use OCR text as the chunk content so LandingAI can read dimensions
                     md = f"<a id='{chunk_id}'></a>\n\n[DIAGRAM DIMENSIONS]\n{ocr_text}"
                     chunk_type = "figure"
                     ocr_used = True
@@ -215,6 +212,47 @@ def _parse_pdf_pymupdf(file_path: str) -> dict:
             round(c["grounding"]["box"]["top"], 2),
             round(c["grounding"]["box"]["left"], 2)
         ))
+
+        # ── Label dimension text near figures as [DIAGRAM DIMENSIONS] ──────
+        # PyMuPDF extracts dimension annotations (e.g. 13-3/4", 36-5/16") as
+        # text blocks overlapping or adjacent to figure blocks.
+        # Find text chunks that contain dimension patterns and are near a figure.
+        _DIM_RE = re.compile(
+            r'\d+[-\s]\d+/\d+["\']?'   # fractions: 13-3/4" or 36 5/16
+            r'|\d+\.\d+["\']?'          # decimals: 13.75"
+            r'|\d+/\d+["\']?'           # simple fractions: 3/4"
+            r'|\b\d{2,4}\s*mm\b'        # mm values: 349mm
+            r'|\bROUND\s+DUCT\b'        # duct labels
+            r'|\bDIMENSION\b'           # dimension labels
+        )
+        figure_boxes = [
+            c["grounding"]["box"] for c in page_chunks if c["type"] == "figure"
+        ]
+
+        for chunk in page_chunks:
+            if chunk["type"] not in ("text", "table"):
+                continue
+            text_content = chunk["markdown"]
+            # Check if this chunk has dimension-like content
+            if not _DIM_RE.search(text_content):
+                continue
+            # Check if it's near a figure block (within 30% of page height)
+            cbox = chunk["grounding"]["box"]
+            near_figure = False
+            for fbox in figure_boxes:
+                vertical_dist = abs(cbox["top"] - fbox["bottom"])
+                horizontal_overlap = (
+                    min(cbox["right"], fbox["right"]) - max(cbox["left"], fbox["left"])
+                )
+                if vertical_dist < 0.35 or horizontal_overlap > 0.1:
+                    near_figure = True
+                    break
+            if near_figure and "[DIAGRAM DIMENSIONS]" not in text_content:
+                # Prepend the diagram label so LandingAI knows this is from a diagram
+                chunk["markdown"] = chunk["markdown"].replace(
+                    "</a>\n\n", "</a>\n\n[DIAGRAM DIMENSIONS]\n", 1
+                )
+        # ────────────────────────────────────────────────────────────────────
 
         all_chunks.extend(page_chunks)
         page_splits.append({

@@ -127,13 +127,42 @@ async def run_extraction_endpoint(
         provider = req.provider_config.provider.lower()
 
         if provider == "landingai":
-            # Use Landing AI's extract API directly on the parsed markdown
-            from app.services.landingai_service import extract_with_landingai, extract_multi_with_landingai
+            from app.services.landingai_service import (
+                extract_with_landingai, extract_multi_with_landingai,
+                parse_with_landingai
+            )
             if not req.provider_config.api_key:
                 raise HTTPException(400, "Landing AI requires an api_key in provider_config.")
-            markdown = doc.parsed_data.get("markdown", "")
+
             environment = req.provider_config.base_url or "production"
             multi_record = req.options.get("multi_record", False)
+            markdown = doc.parsed_data.get("markdown", "")
+
+            # Only re-parse with LandingAI vision if the stored markdown
+            # has a DIMENSIONS section but no actual dimension numbers
+            # (meaning the diagram values are image-only and PyMuPDF missed them)
+            import re as _re
+            has_dimensions_label = bool(_re.search(r'DIMENSIONS?:', markdown, _re.IGNORECASE))
+            has_dimension_numbers = bool(_re.search(
+                r'\d+[-\s]\d+/\d+["\']?|\b\d{1,3}\.\d{1,4}["\']?\s*(?:in|inch|")',
+                markdown
+            ))
+            file_path = doc.file_path
+            import os
+
+            if has_dimensions_label and not has_dimension_numbers and file_path and os.path.exists(file_path):
+                # Diagram values are image-only — use LandingAI vision parser
+                try:
+                    logger.info(f"Diagram-only PDF detected, re-parsing with LandingAI vision: {file_path}")
+                    landingai_parsed = await parse_with_landingai(
+                        file_path=file_path,
+                        api_key=req.provider_config.api_key,
+                        environment=environment,
+                    )
+                    markdown = landingai_parsed.get("markdown", "")
+                    logger.info(f"LandingAI vision markdown length: {len(markdown)}")
+                except Exception as e:
+                    logger.warning(f"LandingAI vision parse failed, using stored markdown: {e}")
 
             if multi_record:
                 extraction = await extract_multi_with_landingai(

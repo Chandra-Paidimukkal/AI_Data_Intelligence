@@ -103,12 +103,12 @@ def _extract_text_from_bytes(content: bytes, ext: str, filename: str) -> str:
             f.write(content)
         from app.services.parser import parse_document
         result = parse_document(tmp_path)
-        return result.get("document_text", "")[:8000]
+        text = result.get("document_text", "")[:8000]
+        return _sanitize_text(text)
     except Exception as e:
         logger.warning(f"Could not extract text from {filename}: {e}")
-        # Fallback: try to decode as text
         try:
-            return content.decode("utf-8", errors="ignore")[:8000]
+            return _sanitize_text(content.decode("utf-8", errors="ignore")[:8000])
         except Exception:
             return f"[Could not extract text from {filename}]"
     finally:
@@ -116,6 +116,19 @@ def _extract_text_from_bytes(content: bytes, ext: str, filename: str) -> str:
             os.remove(tmp_path)
         except Exception:
             pass
+
+
+def _sanitize_text(text: str) -> str:
+    """Remove characters that break JSON serialization."""
+    import re
+    # Remove null bytes and other control characters except newlines/tabs
+    text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+    # Replace smart quotes and other problematic unicode with ASCII equivalents
+    text = text.replace('\u2018', "'").replace('\u2019', "'")
+    text = text.replace('\u201c', '"').replace('\u201d', '"')
+    text = text.replace('\u2013', '-').replace('\u2014', '--')
+    # Escape any remaining backslashes that could break JSON
+    return text.strip()
 
 
 def _build_user_content(message: str, attachments: list, provider: str) -> object:

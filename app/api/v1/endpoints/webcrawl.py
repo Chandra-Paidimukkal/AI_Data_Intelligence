@@ -332,7 +332,7 @@ async def _process_crawl(
 # ── URL extractor from file ───────────────────────────────────────────────────
 
 def _extract_urls_from_file(content: bytes, filename: str) -> list[str]:
-    """Extract URLs from CSV, Excel, or plain text file."""
+    """Extract URLs from CSV, Excel, JSON, or plain text file."""
     ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
     urls = []
 
@@ -346,6 +346,13 @@ def _extract_urls_from_file(content: bytes, filename: str) -> list[str]:
                     for cell in row:
                         if cell and isinstance(cell, str) and cell.startswith("http"):
                             urls.append(cell.strip())
+        except Exception:
+            pass
+
+    elif ext == "json":
+        try:
+            data = json.loads(content.decode("utf-8", errors="ignore"))
+            urls = _extract_urls_from_json(data)
         except Exception:
             pass
 
@@ -379,3 +386,18 @@ def _extract_urls_from_file(content: bytes, filename: str) -> list[str]:
             clean.append(url)
 
     return clean
+
+
+def _extract_urls_from_json(data) -> list[str]:
+    """Recursively extract all URLs from any JSON structure."""
+    urls = []
+    if isinstance(data, str):
+        if data.startswith("http"):
+            urls.append(data.strip())
+    elif isinstance(data, list):
+        for item in data:
+            urls.extend(_extract_urls_from_json(item))
+    elif isinstance(data, dict):
+        for value in data.values():
+            urls.extend(_extract_urls_from_json(value))
+    return urls

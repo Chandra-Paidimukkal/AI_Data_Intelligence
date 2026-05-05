@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import documents, schemas, extraction, export, jobs, batch, compare, chat, intelligence, auth
+from app.api.v1.endpoints import documents, schemas, extraction, export, jobs, batch, compare, chat, intelligence, auth, webcrawl
 from app.api.v1.endpoints import parse
 
 api_router = APIRouter(prefix="/api/v1")
@@ -14,3 +14,4 @@ api_router.include_router(batch.router)
 api_router.include_router(compare.router)
 api_router.include_router(chat.router)
 api_router.include_router(intelligence.router)
+api_router.include_router(webcrawl.router)

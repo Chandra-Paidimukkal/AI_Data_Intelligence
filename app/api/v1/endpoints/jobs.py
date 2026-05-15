@@ -15,30 +15,42 @@ async def list_jobs(
     db: Session = Depends(get_db),
     current_user: Optional[User] = Depends(get_current_user_optional),
 ):
-    query = db.query(ExtractionJob).order_by(ExtractionJob.created_at.desc()).limit(200)
-    query = filter_by_user(query, current_user, ExtractionJob)
-    jobs = query.all()
-    result = []
-    for j in jobs:
+    try:
+        query = db.query(ExtractionJob).order_by(ExtractionJob.created_at.desc()).limit(200)
+        query = filter_by_user(query, current_user, ExtractionJob)
+        jobs = query.all()
+        result = []
+        for j in jobs:
+            try:
+                result.append({
+                    "job_id": j.id,
+                    "document_id": j.document_id,
+                    "schema_id": getattr(j, "schema_id", None),
+                    "schema_name": getattr(j, "schema_name", None),
+                    "batch_id": getattr(j, "batch_id", None),
+                    "status": j.status,
+                    "provider": j.provider,
+                    "model": getattr(j, "model", None),
+                    "duration_seconds": getattr(j, "duration_seconds", None),
+                    "result": j.result,
+                    "created_at": j.created_at.isoformat() if j.created_at else None,
+                    "updated_at": j.updated_at.isoformat() if getattr(j, "updated_at", None) else None,
+                })
+            except Exception:
+                pass
+        return {"jobs": result}
+    except Exception as e:
+        # Fallback: raw SQL query if ORM fails (e.g. missing columns)
+        from sqlalchemy import text
         try:
-            result.append({
-                "job_id": j.id,
-                "document_id": j.document_id,
-                "schema_id": getattr(j, "schema_id", None),
-                "schema_name": getattr(j, "schema_name", None),
-                "batch_id": getattr(j, "batch_id", None),
-                "status": j.status,
-                "provider": j.provider,
-                "model": getattr(j, "model", None),
-                "duration_seconds": getattr(j, "duration_seconds", None),
-                "result": j.result,
-                "created_at": j.created_at.isoformat() if j.created_at else None,
-                "updated_at": j.updated_at.isoformat() if getattr(j, "updated_at", None) else None,
-            })
+            rows = db.execute(text("SELECT id, document_id, status, provider, created_at FROM extraction_jobs ORDER BY created_at DESC LIMIT 200")).fetchall()
+            return {"jobs": [
+                {"job_id": r[0], "document_id": r[1], "status": r[2], "provider": r[3],
+                 "created_at": r[4], "schema_name": None, "batch_id": None, "result": None}
+                for r in rows
+            ]}
         except Exception:
-            # Skip malformed rows rather than crashing the whole list
-            pass
-    return {"jobs": result}
+            return {"jobs": []}
 
 
 @router.get("/{job_id}")

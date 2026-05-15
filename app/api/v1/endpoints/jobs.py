@@ -18,23 +18,27 @@ async def list_jobs(
     query = db.query(ExtractionJob).order_by(ExtractionJob.created_at.desc()).limit(200)
     query = filter_by_user(query, current_user, ExtractionJob)
     jobs = query.all()
-    return {"jobs": [
-        {
-            "job_id": j.id,
-            "document_id": j.document_id,
-            "schema_id": j.schema_id,
-            "schema_name": j.schema_name,
-            "batch_id": j.batch_id,
-            "status": j.status,
-            "provider": j.provider,
-            "model": j.model,
-            "duration_seconds": j.duration_seconds,
-            "result": j.result,
-            "created_at": j.created_at.isoformat() if j.created_at else None,
-            "updated_at": j.updated_at.isoformat() if j.updated_at else None,
-        }
-        for j in jobs
-    ]}
+    result = []
+    for j in jobs:
+        try:
+            result.append({
+                "job_id": j.id,
+                "document_id": j.document_id,
+                "schema_id": getattr(j, "schema_id", None),
+                "schema_name": getattr(j, "schema_name", None),
+                "batch_id": getattr(j, "batch_id", None),
+                "status": j.status,
+                "provider": j.provider,
+                "model": getattr(j, "model", None),
+                "duration_seconds": getattr(j, "duration_seconds", None),
+                "result": j.result,
+                "created_at": j.created_at.isoformat() if j.created_at else None,
+                "updated_at": j.updated_at.isoformat() if getattr(j, "updated_at", None) else None,
+            })
+        except Exception:
+            # Skip malformed rows rather than crashing the whole list
+            pass
+    return {"jobs": result}
 
 
 @router.get("/{job_id}")
@@ -45,20 +49,20 @@ async def get_job(job_id: str, db: Session = Depends(get_db)):
     return {
         "job_id": job.id,
         "document_id": job.document_id,
-        "schema_id": job.schema_id,
-        "schema_name": job.schema_name,
+        "schema_id": getattr(job, "schema_id", None),
+        "schema_name": getattr(job, "schema_name", None),
         "status": job.status,
         "provider": job.provider,
-        "model": job.model,
+        "model": getattr(job, "model", None),
         "result": job.result,
-        "confidence": job.confidence,
-        "sources": job.sources,
-        "evidence": job.evidence,
-        "schema_fields": job.schema_fields,
-        "validation": job.validation_errors,
-        "failure_log": job.failure_log,
-        "duration_seconds": job.duration_seconds,
-        "error_message": job.error_message,
+        "confidence": getattr(job, "confidence", None),
+        "sources": getattr(job, "sources", None),
+        "evidence": getattr(job, "evidence", None),
+        "schema_fields": getattr(job, "schema_fields", None),
+        "validation": getattr(job, "validation_errors", None),
+        "failure_log": getattr(job, "failure_log", None),
+        "duration_seconds": getattr(job, "duration_seconds", None),
+        "error_message": getattr(job, "error_message", None),
         "created_at": job.created_at.isoformat() if job.created_at else None
     }
 

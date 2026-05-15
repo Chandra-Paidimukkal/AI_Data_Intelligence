@@ -142,7 +142,8 @@ async def get_document(
         raise HTTPException(403, "Access denied")
     meta = doc.parsed_data.get("metadata", {}) if doc.parsed_data else {}
     return {
-        "id": doc.id, "file_name": doc.file_name, "file_size": doc.file_size,
+        "id": doc.id, "file_name": doc.file_name, "file_path": doc.file_path,
+        "file_size": doc.file_size,
         "mime_type": doc.mime_type, "page_count": doc.page_count, "status": doc.status,
         "error_message": doc.error_message, "parse_metadata": meta,
         "chunk_count": len(doc.parsed_data.get("chunks", [])) if doc.parsed_data else 0,

@@ -160,7 +160,10 @@ def _convert_fractions_in_markdown(markdown: str) -> str:
     """
     Convert fractional inch measurements like 13-3/4" to decimals (13.75")
     so LandingAI can extract them as numbers.
-    Also converts standalone fractions like 3/4 → 0.75
+
+    IMPORTANT: Only converts true inch fractions where the denominator is a
+    standard fraction denominator (2, 4, 8, 16, 32, 64).
+    Does NOT convert unit-pair values like 70/41 (Lb/kg) or 100/45 (mm/in).
     """
     import re
 
@@ -171,10 +174,20 @@ def _convert_fractions_in_markdown(markdown: str) -> str:
         val = whole + num / den
         return f"{val:.4f}".rstrip('0').rstrip('.')
 
-    # Pattern: 13-3/4 or 13 3/4
+    # Pattern: 13-3/4 or 13 3/4 (whole number + fraction)
     markdown = re.sub(r'(\d+)[-\s](\d+)/(\d+)', frac_to_decimal, markdown)
-    # Pattern: standalone 3/4
-    markdown = re.sub(r'\b(\d+)/(\d+)\b', lambda m: f"{int(m.group(1))/int(m.group(2)):.4f}".rstrip('0').rstrip('.'), markdown)
+
+    # Pattern: standalone fractions like 3/4, 1/2, 5/16
+    # ONLY convert when denominator is a standard inch fraction (2,4,8,16,32,64)
+    # This prevents converting unit pairs like 70/41 (Lb/kg) or 100/45
+    def safe_frac(m):
+        num = int(m.group(1))
+        den = int(m.group(2))
+        if den in (2, 4, 8, 16, 32, 64) and num < den:
+            return f"{num/den:.4f}".rstrip('0').rstrip('.')
+        return m.group(0)  # leave unchanged
+
+    markdown = re.sub(r'\b(\d+)/(\d+)\b', safe_frac, markdown)
     return markdown
 
 

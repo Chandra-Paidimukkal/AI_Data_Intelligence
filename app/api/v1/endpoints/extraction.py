@@ -41,6 +41,31 @@ from app.services.pipeline import run_extraction
 router = APIRouter(prefix="/extraction", tags=["Extraction"])
 
 
+# ── JSON sanitizer — removes NaN/Infinity and non-serializable types ──────────
+def _sanitize_for_json(obj):
+    """Recursively sanitize a value so it can be stored in a JSON column."""
+    import math
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_json(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_json(v) for v in obj]
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
+    if isinstance(obj, (int, str, bool)):
+        return obj
+    # Fallback: convert to string
+    try:
+        import json as _json
+        _json.dumps(obj)
+        return obj
+    except (TypeError, ValueError):
+        return str(obj)
+
+
 # ── Request/Response models ───────────────────────────────────────────────────
 
 class ProviderConfig(BaseModel):
@@ -244,7 +269,12 @@ async def run_extraction_endpoint(
                     provider_config=req.provider_config.dict(),
                 )
         job.status = "completed"
-        job.result = extraction
+        job.result = _sanitize_for_json(extraction)
+        job.confidence = _sanitize_for_json(extraction.get("confidence"))
+        job.sources = _sanitize_for_json(extraction.get("sources"))
+        job.evidence = _sanitize_for_json(extraction.get("evidence"))
+        job.schema_fields = extraction.get("schema_fields")
+        job.failure_log = _sanitize_for_json(extraction.get("failure_log"))
         db.commit()
     except HTTPException:
         raise
@@ -254,7 +284,10 @@ async def run_extraction_endpoint(
         logger.error(f"Extraction failed:\n{error_detail}")
         job.status = "failed"
         job.error = str(e) or type(e).__name__
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
         raise HTTPException(500, f"Extraction failed: {type(e).__name__}: {e}")
 
     return {
@@ -335,12 +368,15 @@ async def run_inline_extraction(
             provider_config=provider_config,
         )
         job.status = "completed"
-        job.result = extraction
+        job.result = _sanitize_for_json(extraction)
         db.commit()
     except Exception as e:
         job.status = "failed"
         job.error = str(e)
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
         raise HTTPException(500, f"Extraction failed: {e}")
 
     return {

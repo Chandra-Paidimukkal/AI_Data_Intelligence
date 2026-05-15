@@ -12,7 +12,7 @@ app = FastAPI(
         "ADE-compatible schema-driven document extraction. "
         "Produces markdown, chunks, splits, grounding exactly like LandingAI ADE."
     ),
-    version="2.0.0"
+    version="2.1.0"
 )
 
 # CORS — allow all origins including localhost dev
@@ -37,7 +37,7 @@ async def startup():
 async def health():
     return {
         "status": "ok",
-        "version": "2.0.0",
+        "version": "2.1.0",
         "parse_engine": "ADE-compatible (PyMuPDF + OCR fallback)"
     }
 
